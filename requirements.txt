@@ -1,0 +1,11 @@
+sap-ai-sdk-gen
+python-dotenv
+langchain
+httpx
+fastmcp
+fastapi
+requests
+uvicorn
+websockets
+pydantic
+cfenv

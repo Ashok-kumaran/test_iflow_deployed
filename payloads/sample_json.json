@@ -1,0 +1,349 @@
+{
+  "meta": {
+    "requestId": "REQ-2026-01-24-000001",
+    "correlationId": "CORR-9f0c6d2e-92b1-4db3-9a75-83d12e2f6df1",
+    "sourceSystem": "SAP_CPI",
+    "targetSystem": "SAP_S4HANA",
+    "environment": "DEV",
+    "createdAt": "2026-01-24T10:15:30Z",
+    "schemaVersion": "1.3.0",
+    "payloadType": "EnterpriseIntegrationTestPayload",
+    "notes": "Large sample payload for testing JSON parsing, mapping, splitting, enrichment, and error handling."
+  },
+  "tenant": {
+    "tenantId": "TEN-IND-001",
+    "tenantName": "Demo Tenant India",
+    "region": "APJ",
+    "timezone": "Asia/Kolkata",
+    "language": "en"
+  },
+  "messages": [
+    {
+      "messageId": "MSG-000001",
+      "messageType": "ORDER_CREATE",
+      "priority": "HIGH",
+      "retryCount": 0,
+      "headers": {
+        "contentType": "application/json",
+        "x-trace-id": "trace-1a2b3c4d",
+        "x-user": "integration_user",
+        "x-channel": "B2B",
+        "x-sender": "HTTPS_SENDER",
+        "x-receiver": "S4H"
+      },
+      "payload": {
+        "order": {
+          "orderId": "SO-2026-000001",
+          "orderDate": "2026-01-24",
+          "orderTime": "10:15:30",
+          "orderStatus": "NEW",
+          "currency": "INR",
+          "salesOrg": "1000",
+          "distributionChannel": "10",
+          "division": "00",
+          "customer": {
+            "customerId": "CUST-1000001",
+            "customerName": "Prem Kumar Enterprises Pvt Ltd",
+            "gstin": "33ABCDE1234F1Z5",
+            "contact": {
+              "email": "prem.kumar@example.com",
+              "phone": "+91-90000-11111",
+              "alternatePhone": null
+            },
+            "billingAddress": {
+              "line1": "No. 12, Anna Nagar",
+              "line2": "Near Central Park",
+              "city": "Chennai",
+              "state": "Tamil Nadu",
+              "postalCode": "600040",
+              "country": "IN"
+            },
+            "shippingAddress": {
+              "line1": "Warehouse 9, Industrial Estate",
+              "line2": "Gate 3, Sector B",
+              "city": "Chennai",
+              "state": "Tamil Nadu",
+              "postalCode": "600096",
+              "country": "IN"
+            }
+          },
+          "items": [
+            {
+              "itemNo": "000010",
+              "material": "MAT-1001",
+              "materialDesc": "Stainless Steel Pipe 1 inch",
+              "quantity": 120,
+              "uom": "EA",
+              "unitPrice": 450.75,
+              "taxCode": "GST18",
+              "discount": {
+                "type": "PERCENT",
+                "value": 5.0
+              },
+              "plant": "1100",
+              "storageLocation": "0001",
+              "scheduleLines": [
+                {
+                  "scheduleLineNo": "0001",
+                  "deliveryDate": "2026-01-27",
+                  "confirmedQty": 60
+                },
+                {
+                  "scheduleLineNo": "0002",
+                  "deliveryDate": "2026-01-30",
+                  "confirmedQty": 60
+                }
+              ],
+              "batchDetails": [
+                {
+                  "batchNo": "BATCH-SSP-001",
+                  "manufactureDate": "2025-12-12",
+                  "expiryDate": "2028-12-12",
+                  "quantity": 40
+                },
+                {
+                  "batchNo": "BATCH-SSP-002",
+                  "manufactureDate": "2025-12-18",
+                  "expiryDate": "2028-12-18",
+                  "quantity": 80
+                }
+              ],
+              "customFields": {
+                "qualityGrade": "A",
+                "warehouseZone": "Z1",
+                "fragile": false
+              }
+            },
+            {
+              "itemNo": "000020",
+              "material": "MAT-2008",
+              "materialDesc": "Industrial Adhesive 5L",
+              "quantity": 18,
+              "uom": "CAN",
+              "unitPrice": 1399.99,
+              "taxCode": "GST12",
+              "discount": {
+                "type": "AMOUNT",
+                "value": 250.0
+              },
+              "plant": "1100",
+              "storageLocation": "0002",
+              "scheduleLines": [
+                {
+                  "scheduleLineNo": "0001",
+                  "deliveryDate": "2026-01-28",
+                  "confirmedQty": 18
+                }
+              ],
+              "batchDetails": [],
+              "customFields": {
+                "hazardous": true,
+                "msdsRequired": true,
+                "temperatureSensitive": false
+              }
+            }
+          ],
+          "pricing": {
+            "subtotal": 0,
+            "taxTotal": 0,
+            "discountTotal": 0,
+            "freight": 1250.0,
+            "grandTotal": 0,
+            "roundOff": 0.0
+          },
+          "payment": {
+            "paymentTerms": "NET30",
+            "paymentMethod": "BANK_TRANSFER",
+            "bankDetails": {
+              "accountName": "Prem Kumar Enterprises Pvt Ltd",
+              "accountNoMasked": "XXXXXX9876",
+              "ifsc": "HDFC0001234",
+              "bankName": "HDFC Bank"
+            },
+            "advancePaid": false,
+            "advanceAmount": 0.0
+          },
+          "references": [
+            {
+              "refType": "PO",
+              "refValue": "PO-789456123",
+              "refDate": "2026-01-23"
+            },
+            {
+              "refType": "CONTRACT",
+              "refValue": "CTR-2025-IND-4433",
+              "refDate": "2025-11-10"
+            }
+          ],
+          "attachments": [
+            {
+              "fileName": "order_note.txt",
+              "mimeType": "text/plain",
+              "contentBase64": "VGhpcyBpcyBhIGxhcmdlIHRlc3QgYXR0YWNobWVudCBmb3IgaUZsb3cgcGF5bG9hZCBwYXJzaW5nLg==",
+              "sizeBytes": 68
+            }
+          ],
+          "audit": {
+            "createdBy": "B2B_PORTAL",
+            "createdAt": "2026-01-24T10:15:30Z",
+            "updatedBy": null,
+            "updatedAt": null
+          }
+        }
+      }
+    },
+    {
+      "messageId": "MSG-000002",
+      "messageType": "INVOICE_CREATE",
+      "priority": "MEDIUM",
+      "retryCount": 1,
+      "headers": {
+        "contentType": "application/json",
+        "x-trace-id": "trace-5e6f7a8b",
+        "x-user": "invoice_user",
+        "x-channel": "B2C",
+        "x-sender": "JMS_START",
+        "x-receiver": "S4H"
+      },
+      "payload": {
+        "invoice": {
+          "invoiceId": "INV-2026-000009",
+          "invoiceDate": "2026-01-24",
+          "currency": "INR",
+          "companyCode": "1000",
+          "referenceOrderId": "SO-2026-000001",
+          "billTo": {
+            "customerId": "CUST-1000001",
+            "name": "Prem Kumar Enterprises Pvt Ltd"
+          },
+          "shipTo": {
+            "customerId": "CUST-1000001",
+            "name": "Prem Kumar Enterprises Pvt Ltd",
+            "city": "Chennai"
+          },
+          "lineItems": [
+            {
+              "lineNo": 1,
+              "material": "MAT-1001",
+              "description": "Stainless Steel Pipe 1 inch",
+              "quantity": 60,
+              "uom": "EA",
+              "netValue": 27045.0,
+              "taxLines": [
+                {
+                  "taxType": "CGST",
+                  "taxRate": 9.0,
+                  "taxAmount": 2434.05
+                },
+                {
+                  "taxType": "SGST",
+                  "taxRate": 9.0,
+                  "taxAmount": 2434.05
+                }
+              ]
+            }
+          ],
+          "totals": {
+            "netTotal": 27045.0,
+            "taxTotal": 4868.1,
+            "grossTotal": 31913.1
+          },
+          "notes": [
+            "Deliver between 9 AM and 6 PM.",
+            "If item damaged, return within 7 days.",
+            "This invoice payload includes nested arrays for taxLines."
+          ]
+        }
+      }
+    },
+    {
+      "messageId": "MSG-000003",
+      "messageType": "MASTERDATA_SYNC",
+      "priority": "LOW",
+      "retryCount": 0,
+      "headers": {
+        "contentType": "application/json",
+        "x-trace-id": "trace-md-112233",
+        "x-channel": "MDG",
+        "x-sender": "HTTPS_SENDER",
+        "x-receiver": "S4H"
+      },
+      "payload": {
+        "masterData": {
+          "materials": [
+            {
+              "material": "MAT-1001",
+              "description": "Stainless Steel Pipe 1 inch",
+              "baseUom": "EA",
+              "grossWeight": 1.25,
+              "netWeight": 1.2,
+              "weightUnit": "KG",
+              "dimensions": {
+                "length": 1.0,
+                "width": 0.1,
+                "height": 0.1,
+                "unit": "M"
+              },
+              "classification": {
+                "productGroup": "PIPES",
+                "industrySector": "M",
+                "hazardous": false
+              }
+            },
+            {
+              "material": "MAT-2008",
+              "description": "Industrial Adhesive 5L",
+              "baseUom": "CAN",
+              "grossWeight": 5.4,
+              "netWeight": 5.0,
+              "weightUnit": "KG",
+              "dimensions": {
+                "length": 0.3,
+                "width": 0.2,
+                "height": 0.25,
+                "unit": "M"
+              },
+              "classification": {
+                "productGroup": "CHEMICALS",
+                "industrySector": "C",
+                "hazardous": true
+              }
+            }
+          ],
+          "customers": [
+            {
+              "customerId": "CUST-1000001",
+              "name": "Prem Kumar Enterprises Pvt Ltd",
+              "status": "ACTIVE",
+              "creditLimit": 1500000.0,
+              "riskCategory": "LOW",
+              "taxNumbers": [
+                {
+                  "type": "GSTIN",
+                  "value": "33ABCDE1234F1Z5"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "debug": {
+    "simulateDelayMs": 0,
+    "injectErrors": false,
+    "errorScenarios": [
+      {
+        "code": "MISSING_FIELD",
+        "description": "Simulate missing mandatory field",
+        "enabled": false
+      },
+      {
+        "code": "INVALID_DATE_FORMAT",
+        "description": "Send date in wrong format",
+        "enabled": false
+      }
+    ],
+    "largeTextBlock": "This is a long block of text to test large string handling in iFlow logging, Groovy scripts, and mapping. It can be repeated or expanded to increase payload size. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+  }
+}

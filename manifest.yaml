@@ -1,0 +1,40 @@
+applications:
+- name: iflow-test-mcp-py
+  random-route: true
+  path: ./
+  memory: 2G
+  disk-quota: 2G
+  instances: 1
+  buildpacks:
+    - python_buildpack
+  env:
+    # SAP AI Core
+    AICORE_AUTH_URL : https://gen-ai.authentication.us10.hana.ondemand.com
+    AICORE_CLIENT_ID : sb-42a29a03-b2f4-47de-9a41-e0936be9aaf5!b256749|aicore!b164
+    AICORE_CLIENT_SECRET : b5e6caee-15aa-493a-a6ac-1fef0ab6e9fe$Satg7UGYPLsz5YYeXefHpbwTfEqqCkQEbasMDPGHAgU=
+    AICORE_RESOURCE_GROUP : default
+    AICORE_BASE_URL : https://api.ai.prod.us-east-1.aws.ml.hana.ondemand.com/v2
+    LLM_DEPLOYMENT_ID : d223bf19a092cfb3  #gpt-5
+
+    ######################### CPI DESIGN TIME (OData / API) #########################
+    # Used for: endpoint discovery, download iFlow zip, configurations
+    API_OAUTH_CLIENT_ID : sb-178c6546-1438-4674-b3bd-8a06968f6739!b337722|it!b56186
+    API_OAUTH_CLIENT_SECRET : ee6eae11-e8f5-4f02-9f29-dd57c55b29b8$X_IeHN5sUVvtIVGina8Y59aM8T2lkHaZYeSrHZlws7o=
+    API_OAUTH_TOKEN_URL : https://cpi-sbx.authentication.us10.hana.ondemand.com/oauth/token
+    API_BASE_URL : https://cpi-sbx.it-cpi019.cfapps.us10-002.hana.ondemand.com/api/v1
+
+    ######################### CPI RUNTIME (iFlow execution) #########################
+    # Used for: calling iFlow runtime endpoints, runtime monitoring APIs
+
+    CPI_OAUTH_CLIENT_ID : sb-d8810ba9-a1d3-45b8-bbea-b8637797162f!b337722|it-rt-cpi-sbx!b56186
+    CPI_OAUTH_CLIENT_SECRET : 628ab7e0-16e1-4748-8217-e7b4d7b46629$_McTMbNFSqn2P-3Kye476F4S9KqekDRqINKJdDw53KE=
+    CPI_OAUTH_TOKEN_URL : https://cpi-sbx.authentication.us10.hana.ondemand.com/oauth/token
+    CPI_BASE_URL : https://cpi-sbx.it-cpi019-rt.cfapps.us10-002.hana.ondemand.com
+
+
+    CPI_BASIC_AUTH_USERNAME : p.karthikeyan@sierradigitalinc.com
+    CPI_BASIC_AUTH_PASSWORD : Prasanth@8055
+    CPI_AUTH_METHOD : basic
+
+  command: python main.py
+

@@ -1,0 +1,809 @@
+"""
+SAP CPI iFlow Testing MCP Server
+
+This FastMCP server provides tools to:
+1. Download and analyze SAP CPI iFlows
+2. Use LLM to generate appropriate sample payloads
+3. Test iFlows with generated payloads
+4. Validate iFlow functionality and safety
+"""
+
+import os
+import io
+import json
+import zipfile
+import requests
+import xml.etree.ElementTree as ET
+from typing import Optional, Dict, Any, List
+from fastmcp import FastMCP
+
+# Try to load .env file if running standalone (not via MCP)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except:
+    pass  # If dotenv not available or .env doesn't exist, use environment variables
+
+# Initialize FastMCP server
+mcp = FastMCP("SAP CPI iFlow Test Tools")
+
+# Environment variables for SAP CPI credentials
+API_BASE_URL = os.getenv("API_BASE_URL")
+API_OAUTH_CLIENT_ID = os.getenv("API_OAUTH_CLIENT_ID")
+API_OAUTH_CLIENT_SECRET = os.getenv("API_OAUTH_CLIENT_SECRET")
+API_OAUTH_TOKEN_URL = os.getenv("API_OAUTH_TOKEN_URL")
+
+CPI_BASE_URL = os.getenv("CPI_BASE_URL")
+CPI_OAUTH_CLIENT_ID = os.getenv("CPI_OAUTH_CLIENT_ID")
+CPI_OAUTH_CLIENT_SECRET = os.getenv("CPI_OAUTH_CLIENT_SECRET")
+CPI_OAUTH_TOKEN_URL = os.getenv("CPI_OAUTH_TOKEN_URL")
+
+
+class OAuth2TokenManager:
+    """Manages OAuth2 tokens for SAP CPI API authentication"""
+    
+    def __init__(self, client_id: str, client_secret: str, token_url: str):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.token_url = token_url
+        self._token = None
+    
+    def get_token(self) -> str:
+        """Get a valid OAuth2 access token"""
+        if self._token is None:
+            self._token = self._fetch_token()
+        return self._token
+    
+    def _fetch_token(self) -> str:
+        """Fetch a new access token from the OAuth2 endpoint"""
+        response = requests.post(
+            self.token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
+        )
+        response.raise_for_status()
+        return response.json()["access_token"]
+    
+    def refresh_token(self):
+        """Force refresh the access token"""
+        self._token = self._fetch_token()
+
+
+class CSRFTokenManager:
+    """Manages CSRF tokens for SAP CPI API authentication"""
+    
+    def __init__(self):
+        self._token_cache = {}  # Cache tokens per URL
+    
+    def get_token(self, session: requests.Session, url: str, headers: Dict[str, str]) -> Optional[str]:
+        """
+        Get a CSRF token, using cached value if available.
+        
+        Args:
+            session: requests.Session object for making requests
+            url: The URL endpoint to fetch CSRF token for
+            headers: Base headers to use in the request
+        
+        Returns:
+            CSRF token string if successful, None otherwise
+        """
+        # Return cached token if available
+        if url in self._token_cache:
+            return self._token_cache[url]
+        
+        # Fetch new token
+        token = self._fetch_token(session, url, headers)
+        
+        # Cache the token
+        if token:
+            self._token_cache[url] = token
+        
+        return token
+    
+    def _fetch_token(self, session: requests.Session, url: str, headers: Dict[str, str]) -> Optional[str]:
+        """
+        Fetch CSRF token via GET with X-CSRF-Token: Fetch header.
+        
+        Args:
+            session: requests.Session object for making requests
+            url: The URL endpoint to fetch CSRF token from
+            headers: Base headers to include in the request
+        
+        Returns:
+            CSRF token string if successful, None otherwise
+        """
+        try:
+            csrf_headers = dict(headers)
+            csrf_headers["X-CSRF-Token"] = "Fetch"
+            
+            # Send GET request to fetch CSRF token
+            response = session.get(url, headers=csrf_headers)
+            
+            # Accept both 200 and 404 as valid responses for CSRF token fetch
+            # Some endpoints return 404 for GET but provide CSRF token in header
+            if response.status_code in (200, 204, 404):
+                csrf_token = response.headers.get("X-CSRF-Token") or response.headers.get("x-csrf-token")
+                if csrf_token and csrf_token.lower() != "required":
+                    return csrf_token
+        except Exception as e:
+            print(f"Error fetching CSRF token: {e}")
+        return None
+    
+    def invalidate_token(self, url: str) -> None:
+        """
+        Invalidate cached token for a specific URL.
+        
+        Args:
+            url: The URL for which to invalidate the token
+        """
+        if url in self._token_cache:
+            del self._token_cache[url]
+    
+    def clear_cache(self) -> None:
+        """Clear all cached tokens"""
+        self._token_cache.clear()
+
+
+# Token managers
+api_token_manager = OAuth2TokenManager(
+    API_OAUTH_CLIENT_ID,
+    API_OAUTH_CLIENT_SECRET,
+    API_OAUTH_TOKEN_URL
+)
+
+runtime_token_manager = OAuth2TokenManager(
+    CPI_OAUTH_CLIENT_ID,
+    CPI_OAUTH_CLIENT_SECRET,
+    CPI_OAUTH_TOKEN_URL
+)
+
+csrf_token_manager = CSRFTokenManager()
+
+# Validate required environment variables
+if not all([API_OAUTH_CLIENT_ID, API_OAUTH_CLIENT_SECRET, API_OAUTH_TOKEN_URL]):
+    raise ValueError("Missing required API OAuth environment variables: API_OAUTH_CLIENT_ID, API_OAUTH_CLIENT_SECRET, API_OAUTH_TOKEN_URL")
+
+if not all([CPI_OAUTH_CLIENT_ID, CPI_OAUTH_CLIENT_SECRET, CPI_OAUTH_TOKEN_URL]):
+    raise ValueError("Missing required CPI OAuth environment variables: CPI_OAUTH_CLIENT_ID, CPI_OAUTH_CLIENT_SECRET, CPI_OAUTH_TOKEN_URL")
+
+
+def parse_odata_xml_response(xml_content: str) -> Dict[str, Any]:
+    """Parse OData XML (Atom) response to extract data"""
+    try:
+        root = ET.fromstring(xml_content)
+        
+        # OData Atom XML namespaces
+        namespaces = {
+            'atom': 'http://www.w3.org/2005/Atom',
+            'm': 'http://schemas.microsoft.com/ado/2007/08/dataservices/metadata',
+            'd': 'http://schemas.microsoft.com/ado/2007/08/dataservices'
+        }
+        
+        results = []
+        
+        # Find all entry elements
+        for entry in root.findall('.//atom:entry', namespaces):
+            result = {}
+            
+            # Extract properties from content/properties
+            properties = entry.find('.//m:properties', namespaces)
+            if properties is not None:
+                for prop in properties:
+                    # Remove namespace prefix from tag
+                    tag = prop.tag.split('}')[-1] if '}' in prop.tag else prop.tag
+                    result[tag] = prop.text if prop.text else ''
+            
+            if result:
+                results.append(result)
+        
+        return {'d': {'results': results}}
+    
+    except Exception as e:
+        # If XML parsing fails, return empty structure
+        return {'d': {'results': []}}
+
+
+
+def parse_iflow_xml(xml_content: str) -> Dict[str, Any]:
+    """Parse iFlow XML to extract key information"""
+    try:
+        root = ET.fromstring(xml_content)
+        
+        # Extract namespaces
+        namespaces = {
+            'ifl': 'http://www.sap.com/ifl',
+            'bpmn2': 'http://www.omg.org/spec/BPMN/20100524/MODEL'
+        }
+        
+        # Detect sender adapters
+        sender_adapters = []
+        for sender in root.findall('.//bpmn2:participant[@processRef]', namespaces):
+            name = sender.get('name', 'Unknown')
+            sender_adapters.append(name)
+        
+        # Detect receiver adapters
+        receiver_adapters = []
+        for receiver in root.findall('.//bpmn2:endEvent', namespaces):
+            name = receiver.get('name', 'Unknown')
+            receiver_adapters.append(name)
+        
+        # Detect data format
+        data_format = "Unknown"
+        if 'JSON' in xml_content or 'json' in xml_content.lower():
+            data_format = "JSON"
+        elif 'XML' in xml_content or 'xml' in xml_content.lower():
+            data_format = "XML"
+        
+        # Detect HTTP method from process
+        http_method = "POST"  # Default
+        if 'GET' in xml_content:
+            http_method = "GET"
+        elif 'PUT' in xml_content:
+            http_method = "PUT"
+        elif 'DELETE' in xml_content:
+            http_method = "DELETE"
+        
+        return {
+            "sender_adapters": sender_adapters,
+            "receiver_adapters": receiver_adapters,
+            "data_format": data_format,
+            "http_method": http_method,
+            "has_mapping": "mapping" in xml_content.lower() or "xslt" in xml_content.lower(),
+            "has_scripting": "script" in xml_content.lower() or "groovy" in xml_content.lower()
+        }
+    except Exception as e:
+        return {"error": f"Failed to parse iFlow XML: {str(e)}"}
+
+
+def _download_iflow_internal(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
+    """Internal function to download iFlow - used by both tool and other functions"""
+    try:
+        token = api_token_manager.get_token()
+        
+        # Download iFlow ZIP
+        url = f"{API_BASE_URL}/IntegrationDesigntimeArtifacts(Id='{integration_flow_id}',Version='{version}')/$value"
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        
+        if response.status_code == 401:
+            api_token_manager.refresh_token()
+            token = api_token_manager.get_token()
+            response = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"}
+            )
+        
+        response.raise_for_status()
+        
+        # Extract ZIP content
+        zip_buffer = io.BytesIO(response.content)
+        iflow_data = {
+            "integration_flow_id": integration_flow_id,
+            "version": version,
+            "files": [],
+            "iflow_xml": None,
+            "metadata": {}
+        }
+        
+        with zipfile.ZipFile(zip_buffer, 'r') as zip_file:
+            for file_info in zip_file.filelist:
+                file_name = file_info.filename
+                iflow_data["files"].append(file_name)
+                
+                # Extract main iFlow XML
+                if file_name.endswith('.iflw'):
+                    content = zip_file.read(file_name).decode('utf-8')
+                    iflow_data["iflow_xml"] = content
+                    iflow_data["metadata"] = parse_iflow_xml(content)
+                
+                # Extract XSD schemas if present
+                elif file_name.endswith('.xsd'):
+                    content = zip_file.read(file_name).decode('utf-8')
+                    if "schemas" not in iflow_data:
+                        iflow_data["schemas"] = {}
+                    iflow_data["schemas"][file_name] = content
+        
+        return iflow_data
+    
+    except Exception as e:
+        return {"error": f"Failed to download iFlow: {str(e)}"}
+
+
+@mcp.tool(name = "download-iflow")
+def download_iflow(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
+    """
+    Download an SAP CPI integration flow as a ZIP file and extract its structure.
+    
+    Args:
+        integration_flow_id: The ID of the integration flow to download
+        version: Version to download (default: "active")
+    
+    Returns:
+        Dictionary containing iFlow metadata and structure
+    """
+    return _download_iflow_internal(integration_flow_id, version)
+
+
+@mcp.tool(name = "get-iflow-endpoint")
+def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
+    """
+    Get the runtime endpoints for a deployed integration flow using the OData API.
+    
+    Args:
+        integration_flow_id: The ID or Name of the integration flow
+    
+    Returns:
+        Dictionary containing endpoint information
+    """
+    try:
+        token = runtime_token_manager.get_token()
+
+        url = f"{CPI_BASE_URL}/api/v1/IntegrationRuntimeArtifacts"
+        params = {
+            "$filter": f"Id eq '{integration_flow_id}' or Name eq '{integration_flow_id}'",
+            "$expand": "EntryPoints,ApiDefinitions",
+            "$format": "json"
+        }
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = requests.get(url, headers=headers, params=params)
+
+        if response.status_code == 401:
+            runtime_token_manager.refresh_token()
+            token = runtime_token_manager.get_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            response = requests.get(url, headers=headers, params=params)
+
+        response.raise_for_status()
+
+        content_type = response.headers.get("content-type", "").lower()
+        if "xml" in content_type:
+            data = parse_odata_xml_response(response.text)
+        else:
+            data = response.json()
+
+        entries = []
+        if isinstance(data, dict):
+            if "d" in data and isinstance(data["d"], dict):
+                entries = data["d"].get("results", [])
+            elif "value" in data:
+                entries = data.get("value", [])
+
+        return {
+            "integration_flow_id": integration_flow_id,
+            "count": len(entries),
+            "endpoints": entries
+        }
+
+    except Exception as e:
+        return {"error": f"Failed to get endpoint: {str(e)}"}
+
+
+def _analyze_iflow_for_payload_internal(integration_flow_id: str, version: str = "active") -> str:
+    """Internal function to analyze iFlow - used by both tool and other functions"""
+    # Download and parse the iFlow
+    iflow_data = _download_iflow_internal(integration_flow_id, version)
+    
+    if "error" in iflow_data:
+        return f"Error: {iflow_data['error']}"
+    
+    metadata = iflow_data.get("metadata", {})
+    
+    # Build comprehensive analysis
+    analysis = f"""
+=== SAP CPI iFlow Analysis for Payload Generation ===
+
+Integration Flow ID: {integration_flow_id}
+Version: {version}
+
+--- Adapter Information ---
+Sender Adapters: {', '.join(metadata.get('sender_adapters', ['Not detected']))}
+Receiver Adapters: {', '.join(metadata.get('receiver_adapters', ['Not detected']))}
+
+--- Data Format ---
+Expected Format: {metadata.get('data_format', 'Unknown')}
+HTTP Method: {metadata.get('http_method', 'POST')}
+
+--- Processing Capabilities ---
+Has Data Mapping: {metadata.get('has_mapping', False)}
+Has Scripting/Transformation: {metadata.get('has_scripting', False)}
+
+--- Available Schemas ---
+"""
+    
+    # Add schema information if available
+    if "schemas" in iflow_data:
+        analysis += f"Found {len(iflow_data['schemas'])} XSD schema(s):\n"
+        for schema_name, schema_content in iflow_data['schemas'].items():
+            analysis += f"\n--- Schema: {schema_name} ---\n"
+            # Extract root elements from schema
+            try:
+                schema_root = ET.fromstring(schema_content)
+                elements = schema_root.findall('.//{http://www.w3.org/2001/XMLSchema}element[@name]')
+                if elements:
+                    element_names = [name for elem in elements[:5] if (name := elem.get('name')) is not None]
+                    analysis += "Root elements: " + ', '.join(element_names) + "\n"
+                    analysis += f"\nSchema Content (first 1000 chars):\n{schema_content[:1000]}\n"
+            except:
+                analysis += "Schema parsing failed\n"
+    else:
+        analysis += "No XSD schemas found in iFlow package\n"
+    
+    analysis += """
+--- Recommended Actions for LLM ---
+Based on this analysis, please generate a realistic sample payload that:
+1. Matches the expected data format (JSON/XML)
+2. Contains realistic business data (e.g., order, customer, product info)
+3. Includes all required fields based on schemas (if available)
+4. Uses appropriate data types and structures
+5. Can be used to test the iFlow end-to-end
+
+Please generate a complete, valid sample payload suitable for testing this iFlow.
+"""
+    
+    return analysis
+
+
+@mcp.tool(name = "analyze-iflow-for-payload")
+def analyze_iflow_for_payload(integration_flow_id: str, version: str = "active") -> str:
+    """
+    Analyze an iFlow and provide detailed information to help generate a sample payload.
+    This tool downloads the iFlow, parses its structure, and returns comprehensive
+    information that an LLM can use to generate appropriate test payloads.
+    
+    Args:
+        integration_flow_id: The ID of the integration flow to analyze
+        version: Version to analyze (default: "active")
+    
+    Returns:
+        Formatted string containing iFlow analysis for LLM payload generation
+    """
+    return _analyze_iflow_for_payload_internal(integration_flow_id, version)
+
+
+@mcp.tool(name = "generate-sample-payload-with-llm")
+def generate_sample_payload_with_llm(
+    integration_flow_id: str,
+    llm_prompt: Optional[str] = None,
+    version: str = "active"
+) -> Dict[str, Any]:
+    """
+    Use an LLM to generate a realistic sample payload for an SAP CPI iFlow.
+    
+    This tool analyzes the iFlow structure and asks the LLM (via the calling agent)
+    to generate an appropriate test payload based on the iFlow's characteristics.
+    
+    Args:
+        integration_flow_id: The ID of the integration flow
+        llm_prompt: Optional custom prompt for the LM
+        version: Version to analyze (default: "active")
+    
+    Returns:
+        Dictionary with analysis and instructions for payload generation
+    """
+    # Get comprehensive iFlow analysis
+    iflow_data = _download_iflow_internal(integration_flow_id, version)
+    
+    if "error" in iflow_data:
+        return {"error": iflow_data["error"]}
+    
+    metadata = iflow_data.get("metadata", {})
+    
+    # Build comprehensive analysis
+    analysis = f"""
+=== SAP CPI iFlow Analysis for Payload Generation ===
+
+Integration Flow ID: {integration_flow_id}
+Version: {version}
+
+--- Adapter Information ---
+Sender Adapters: {', '.join(metadata.get('sender_adapters', ['Not detected']))}
+Receiver Adapters: {', '.join(metadata.get('receiver_adapters', ['Not detected']))}
+
+--- Data Format ---
+Expected Format: {metadata.get('data_format', 'Unknown')}
+HTTP Method: {metadata.get('http_method', 'POST')}
+
+--- Processing Capabilities ---
+Has Data Mapping: {metadata.get('has_mapping', False)}
+Has Scripting/Transformation: {metadata.get('has_scripting', False)}
+
+--- Available Schemas ---
+"""
+    
+    # Add schema information if available
+    if "schemas" in iflow_data:
+        analysis += f"Found {len(iflow_data['schemas'])} XSD schema(s):\n"
+        for schema_name, schema_content in iflow_data['schemas'].items():
+            analysis += f"\n--- Schema: {schema_name} ---\n"
+            # Extract root elements from schema
+            try:
+                schema_root = ET.fromstring(schema_content)
+                elements = schema_root.findall('.//{http://www.w3.org/2001/XMLSchema}element[@name]')
+                if elements:
+                    element_names = [name for elem in elements[:5] if (name := elem.get('name')) is not None]
+                    analysis += "Root elements: " + ', '.join(element_names) + "\n"
+                    analysis += f"\nSchema Content (first 1000 chars):\n{schema_content[:1000]}\n"
+            except:
+                analysis += "Schema parsing failed\n"
+    else:
+        analysis += "No XSD schemas found in iFlow package\n"
+    
+    analysis += """
+--- Recommended Actions for LLM ---
+Based on this analysis, please generate a realistic sample payload that:
+1. Matches the expected data format (JSON/XML)
+2. Contains realistic business data (e.g., order, customer, product info)
+3. Includes all required fields based on schemas (if available)
+4. Uses appropriate data types and structures
+5. Can be used to test the iFlow end-to-end
+
+Please generate a complete, valid sample payload suitable for testing this iFlow.
+"""
+    
+    default_prompt = """
+Based on the iFlow analysis above, generate a realistic sample payload.
+
+Consider:
+- The data format (JSON/XML)
+- Any schemas or field definitions
+- Typical business scenarios (orders, customers, products, etc.)
+- Required vs optional fields
+
+Provide the payload in the correct format, ready to send to the iFlow endpoint.
+"""
+    
+    return {
+        "integration_flow_id": integration_flow_id,
+        "analysis": analysis,
+        "llm_instructions": llm_prompt or default_prompt,
+        "note": "The calling agent should now use this analysis to generate an appropriate payload"
+    }
+
+
+@mcp.tool(name = "test-iflow-with-payload")
+def test_iflow_with_payload(
+    integration_flow_id: str,
+    payload: str,
+    endpoint_path: str,
+    content_type: str = "application/json",
+    http_method: str = "POST"
+) -> Dict[str, Any]:
+    """
+    Test an SAP CPI integration flow by sending a payload to its endpoint.
+    
+    Args:
+        integration_flow_id: The ID of the integration flow to test
+        payload: The payload to send (JSON string or XML string)
+        endpoint_path: The specific endpoint path (e.g., "/test/order")
+        content_type: Content type header (default: "application/json")
+        http_method: HTTP method to use (default: "POST")
+    
+    Returns:
+        Dictionary containing test results including response, status, and validation
+    """
+    try:
+        token = runtime_token_manager.get_token()
+        
+        # Construct full endpoint URL
+        # Format: {CPI_BASE_URL}/http/{endpoint_path}
+        # Remove leading slash from endpoint_path if present to avoid double slashes
+        if endpoint_path.startswith('/'):
+            endpoint_path = endpoint_path[1:]
+        
+        url = f"{CPI_BASE_URL}/{endpoint_path}"
+        
+        # Prepare headers
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": content_type,
+            "Accept": "*/*"
+        }
+
+        session = requests.Session()
+
+        # Fetch CSRF token for non-GET requests
+        csrf_token = None
+        if http_method.upper() in ("POST", "PUT", "DELETE"):
+            csrf_token = csrf_token_manager.get_token(session, url, headers)
+            if csrf_token:
+                headers["X-CSRF-Token"] = csrf_token
+            else:
+                # Log warning but continue - some endpoints may not require CSRF
+                print(f"Warning: Could not fetch CSRF token for {url}")
+        
+        # Send request
+        if http_method.upper() == "GET":
+            response = session.get(url, headers=headers)
+        elif http_method.upper() == "POST":
+            response = session.post(url, data=payload, headers=headers)
+        elif http_method.upper() == "PUT":
+            response = session.put(url, data=payload, headers=headers)
+        elif http_method.upper() == "DELETE":
+            response = session.delete(url, headers=headers)
+        else:
+            return {"error": f"Unsupported HTTP method: {http_method}"}
+        
+        # Handle 401/403 by refreshing tokens
+        if response.status_code in (401, 403):
+            # Refresh OAuth token
+            runtime_token_manager.refresh_token()
+            token = runtime_token_manager.get_token()
+            headers["Authorization"] = f"Bearer {token}"
+            
+            # Invalidate and re-fetch CSRF token
+            csrf_token_manager.invalidate_token(url)
+            if http_method.upper() in ("POST", "PUT", "DELETE"):
+                csrf_token = csrf_token_manager.get_token(session, url, headers)
+                if csrf_token:
+                    headers["X-CSRF-Token"] = csrf_token
+                else:
+                    print(f"Warning: Could not fetch CSRF token on retry for {url}")
+            
+            # Retry request with new tokens
+            if http_method.upper() == "POST":
+                response = session.post(url, data=payload, headers=headers)
+            elif http_method.upper() == "GET":
+                response = session.get(url, headers=headers)
+            elif http_method.upper() == "PUT":
+                response = session.put(url, data=payload, headers=headers)
+            elif http_method.upper() == "DELETE":
+                response = session.delete(url, headers=headers)
+        
+        # Analyze response
+        success = 200 <= response.status_code < 300
+        
+        result = {
+            "integration_flow_id": integration_flow_id,
+            "test_status": "SUCCESS" if success else "FAILED",
+            "http_status": response.status_code,
+            "endpoint_url": url,
+            "request": {
+                "method": http_method,
+                "payload": payload[:500] + "..." if len(payload) > 500 else payload,
+                "content_type": content_type,
+                "csrf_token_used": csrf_token is not None,
+                "csrf_token_value": csrf_token[:10] + "..." if csrf_token and len(csrf_token) > 10 else csrf_token
+            },
+            "response": {
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+                "body": response.text[:2000] if len(response.text) > 2000 else response.text,
+                "body_length": len(response.text)
+            },
+            "validation": {
+                "is_successful": success,
+                "has_response": len(response.text) > 0,
+                "response_content_type": response.headers.get('Content-Type', 'Unknown')
+            }
+        }
+        
+        return result
+    
+    except Exception as e:
+        return {
+            "integration_flow_id": integration_flow_id,
+            "test_status": "ERROR",
+            "error": str(e),
+            "endpoint_url": url if 'url' in locals() else "Unknown"
+        }
+
+
+@mcp.tool(name = "test-iflow-with-sample-payload")
+def test_iflow_with_sample_payload(
+    integration_flow_id: str,
+    endpoint_path: str,
+    version: str = "active"
+) -> str:
+    """
+    Complete end-to-end test: Analyze iFlow, generate sample payload, and test.
+    
+    This is a comprehensive testing tool that:
+    1. Downloads and analyzes the iFlow
+    2. Provides analysis for LLM to generate payload
+    3. Returns instructions for completing the test
+    
+    Args:
+        integration_flow_id: The ID of the integration flow to test
+        endpoint_path: The endpoint path for the iFlow
+        version: Version to test (default: "active")
+    
+    Returns:
+        Formatted instructions for completing the end-to-end test
+    """
+    # Get iFlow analysis
+    analysis = _analyze_iflow_for_payload_internal(integration_flow_id, version)
+    
+    if "Error:" in analysis:
+        return analysis
+    
+    instructions = f"""
+=== iFlow End-to-End Test Instructions ===
+
+{analysis}
+
+--- Next Steps ---
+1. Review the iFlow analysis above
+2. Generate an appropriate sample payload based on the analysis
+3. Use the test_iflow_with_payload tool with:
+   - integration_flow_id: {integration_flow_id}
+   - payload: <your generated payload>
+   - endpoint_path: {endpoint_path}
+   - content_type: (application/json or application/xml based on analysis)
+   - http_method: (from analysis)
+
+4. Review the test results for:
+   - HTTP status code (200-299 = success)
+   - Response body and headers
+   - Any error messages
+   - Data transformation correctness
+
+--- Endpoint Information ---
+Endpoint Path: {endpoint_path}
+Full URL will be: {CPI_BASE_URL}/http{endpoint_path}
+"""
+    
+    return instructions
+
+
+@mcp.tool(name = "get-iflow-configuration")
+def get_iflow_configuration(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
+    """
+    Get configuration parameters (key/value pairs) of an SAP CPI integration flow.
+    
+    Args:
+        integration_flow_id: The ID of the integration flow
+        version: Version to query (default: "active")
+    
+    Returns:
+        Dictionary containing configuration parameters
+    """
+    try:
+        token = api_token_manager.get_token()
+        
+        url = f"{API_BASE_URL}/IntegrationDesigntimeArtifacts(Id='{integration_flow_id}',Version='{version}')/Configurations"
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        
+        if response.status_code == 401:
+            api_token_manager.refresh_token()
+            token = api_token_manager.get_token()
+            response = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {token}"}
+            )
+        
+        response.raise_for_status()
+        
+        # Try JSON first, fall back to XML if needed
+        try:
+            data = response.json()
+        except:
+            # Response is likely XML (OData Atom format)
+            data = parse_odata_xml_response(response.text)
+        
+        configurations = {}
+        if "d" in data and "results" in data["d"]:
+            for config in data["d"]["results"]:
+                param_key = config.get("ParameterKey")
+                param_value = config.get("ParameterValue")
+                configurations[param_key] = param_value
+        
+        return {
+            "integration_flow_id": integration_flow_id,
+            "version": version,
+            "configurations": configurations
+        }
+    
+    except Exception as e:
+        return {"error": f"Failed to get configurations: {str(e)}"}
+
+
