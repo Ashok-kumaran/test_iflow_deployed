@@ -11,11 +11,12 @@ This FastMCP server provides tools to:
 import os
 import io
 import json
+import logging
 import random
 import zipfile
 import requests
 import xml.etree.ElementTree as ET
-import threading
+
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from fastmcp import FastMCP
@@ -27,6 +28,30 @@ try:
     load_dotenv()
 except:
     pass  # If dotenv not available or .env doesn't exist, use environment variables
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+logger = logging.getLogger("mcp_tools")
+
+
+def _log_call(tool: str, **kwargs) -> None:
+    parts = ", ".join(f"{k}={repr(v)}" for k, v in kwargs.items())
+    logger.info("[CALL] %s | %s", tool, parts)
+
+
+def _log_response(tool: str, result: Any) -> None:
+    summary = repr(result)
+    if len(summary) > 600:
+        summary = summary[:600] + "..."
+    logger.info("[RESPONSE] %s | %s", tool, summary)
+
+
+def _log_error(tool: str, exc: Exception) -> None:
+    logger.error("[ERROR] %s | %s: %s", tool, type(exc).__name__, exc)
+
 
 # Initialize FastMCP server
 mcp = FastMCP("SAP CPI iFlow Test Tools")
@@ -188,7 +213,7 @@ class CSRFTokenManager:
                 
                 if token and token.lower() not in ("required", "fetch", ""):
                     return token
-        except Exception as e:
+        except Exception:
             # Silent fail - CSRF token fetch failure is not critical
             pass
         
@@ -343,7 +368,7 @@ def parse_odata_xml_response(xml_content: str) -> Dict[str, Any]:
         
         return {'d': {'results': results}}
     
-    except Exception as e:
+    except Exception:
         # If XML parsing fails, return empty structure
         return {'d': {'results': []}}
 
@@ -462,59 +487,59 @@ async def get_an_integration_package(integration_package_id: str):
     Args:
         integration_package_id: Integration Package ID (example: "MyPackage")
     """
+    _log_call("get_integration_package_by_id", integration_package_id=integration_package_id)
     try:
         results = await get_an_integration_package_tool(integration_package_id)
+        _log_response("get_integration_package_by_id", results)
         return results
-    
     except Exception as e:
-        print(f"===> Exception in get_an_integration_package function: {e}")
+        _log_error("get_integration_package_by_id", e)
         raise
-        
-    finally:
-        pass     
 
 #Tool 2 get-all-packages
 @mcp.tool(name="get_all_integration_packages",  description="List all SAP CPI Integration Packages.")
 async def get_all_integration_package():
     """ Returns all integration packages available in the tenant. """
+    _log_call("get_all_integration_packages")
     try:
         results = await get_all_integration_package_tool()
+        _log_response("get_all_integration_packages", results)
         return results
-    
     except Exception as e:
-        print(f"===> Exception in get_all_integration_package function: {e}")
+        _log_error("get_all_integration_packages", e)
         raise
-        
-    finally:
-        pass     
 
 #Tool 3
 @mcp.tool(name = "download-iflow")
 def download_iflow(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
     """
     Download an SAP CPI integration flow as a ZIP file and extract its structure.
-    
+
     Args:
         integration_flow_id: The ID of the integration flow to download
         version: Version to download (default: "active")
-    
+
     Returns:
         Dictionary containing iFlow metadata and structure
     """
-    return _download_iflow_internal(integration_flow_id, version)
+    _log_call("download-iflow", integration_flow_id=integration_flow_id, version=version)
+    result = _download_iflow_internal(integration_flow_id, version)
+    _log_response("download-iflow", result)
+    return result
 
 #Tool 4
 @mcp.tool(name = "get-iflow-endpoint")
 def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
     """
     Get the runtime endpoints for a deployed integration flow using the OData API.
-    
+
     Args:
         integration_flow_id: The ID or Name of the integration flow
-    
+
     Returns:
         Dictionary containing endpoint information
     """
+    _log_call("get-iflow-endpoint", integration_flow_id=integration_flow_id)
     try:
         token = api_token_manager.get_token()
 
@@ -561,13 +586,16 @@ def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
         # Example: take first URL if you expect only one
         endpoint_url = urls[0] if urls else "unabe to fetch url"
 
-        return {
+        result = {
             "integration_flow_id": integration_flow_id,
             "count": len(entries),
             "endpoints": endpoint_url
         }
+        _log_response("get-iflow-endpoint", result)
+        return result
 
     except Exception as e:
+        _log_error("get-iflow-endpoint", e)
         return {"error": f"Failed to get endpoint: {str(e)}"}
 
 
@@ -580,18 +608,19 @@ def generate_sample_payload_with_llm(
 ) -> Dict[str, Any]:
     """
     Use an LLM to generate a realistic sample payload for an SAP CPI iFlow.
-    
+
     This tool analyzes the iFlow structure and asks the LLM (via the calling agent)
     to generate an appropriate test payload based on the iFlow's characteristics.
-    
+
     Args:
         integration_flow_id: The ID of the integration flow
         llm_prompt: Optional custom prompt for the LLM
         version: Version to analyze (default: "active")
-    
+
     Returns:
         Dictionary with analysis and instructions for payload generation
     """
+    _log_call("generate-sample-payload-with-llm", integration_flow_id=integration_flow_id, version=version)
     # Get comprehensive iFlow analysis
     iflow_data = _download_iflow_internal(integration_flow_id, version)
     
@@ -664,12 +693,14 @@ Consider:
 Provide the payload in the correct format, ready to send to the iFlow endpoint.
 """
     
-    return {
+    result = {
         "integration_flow_id": integration_flow_id,
         "analysis": analysis,
         "llm_instructions": llm_prompt or default_prompt,
         "note": "The calling agent should now use this analysis to generate an appropriate payload"
     }
+    _log_response("generate-sample-payload-with-llm", result)
+    return result
 
 
 def _send_http_request(
@@ -740,6 +771,12 @@ def test_iflow_with_payload(
     csrf_endpoint_path: Optional[str] = None,
     header: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
+    _log_call("test-iflow-with-payload",
+              integration_flow_id=integration_flow_id,
+              endpoint_path=endpoint_path,
+              http_method=http_method,
+              content_type=content_type,
+              payload_preview=payload[:200] + "..." if len(payload) > 200 else payload)
 
     # ---------------------------------------
     # 1. Build URLs
@@ -752,11 +789,6 @@ def test_iflow_with_payload(
         csrf_endpoint_path = csrf_endpoint_path.lstrip("/")
         csrf_url = f"{CPI_BASE_URL}/{csrf_endpoint_path}"
 
-    # If entity passed → attach as query param (safe default)
-    # if entity:
-    #     joiner = "&" if "?" in url else "?"
-    #     url = f"{url}{joiner}entity={entity}"
-
     session = requests.Session()
 
     # ---------------------------------------
@@ -766,7 +798,7 @@ def test_iflow_with_payload(
         "Content-Type": content_type,
         "Accept": "*/*"
     }
-    print("header from llm",header)
+    logger.info("[test-iflow-with-payload] extra headers from caller: %s", header)
     if header:
         for hdr_key in header:
             value=header[hdr_key]
@@ -870,17 +902,16 @@ def test_iflow_with_payload(
     # ---------------------------------------
     success = 200 <= response.status_code < 300
     response_body = response.text
-    try:        
-        data = response.json()  
-        # Try parsing as JSON        
-        print("JSON response:", data)        
-        response_body =  data    
-    except json.JSONDecodeError:        
-        print("Raw text response:", response_body)        
-        response_body = response_body
- 
+    try:
+        data = response.json()
+        logger.info("[test-iflow-with-payload] response body (JSON): %s",
+                    str(data)[:400] + "..." if len(str(data)) > 400 else data)
+        response_body = data
+    except json.JSONDecodeError:
+        logger.info("[test-iflow-with-payload] response body (text): %s",
+                    response_body[:400] + "..." if len(response_body) > 400 else response_body)
 
-    return {
+    result = {
         "integration_flow_id": integration_flow_id,
         "endpoint_url": url,
         "test_status": "SUCCESS" if success else "FAILED",
@@ -889,7 +920,6 @@ def test_iflow_with_payload(
         "auth_fallback_used": fallback_used,
         "csrf_token_used": csrf_token is not None,
         "request": {
-            # "method": http_method,
             "content_type": content_type,
             "payload_preview": payload[:500] + "..." if len(payload) > 500 else payload
         },
@@ -900,29 +930,37 @@ def test_iflow_with_payload(
             "body_length": len(response.text)
         }
     }
+    _log_response("test-iflow-with-payload", {
+        "test_status": result["test_status"],
+        "http_status": result["http_status"],
+        "auth_method": result["auth_method"],
+        "csrf_token_used": result["csrf_token_used"],
+    })
+    return result
 
 #Tool 7
 @mcp.tool(name = "get-iflow-configuration")
 def get_iflow_configuration(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
     """
     Get configuration parameters (key/value pairs) of an SAP CPI integration flow.
-    
+
     Args:
         integration_flow_id: The ID of the integration flow
         version: Version to query (default: "active")
-    
+
     Returns:
         Dictionary containing configuration parameters
     """
+    _log_call("get-iflow-configuration", integration_flow_id=integration_flow_id, version=version)
     try:
         token = api_token_manager.get_token()
-        
+
         url = f"{API_BASE_URL}/IntegrationDesigntimeArtifacts(Id='{integration_flow_id}',Version='{version}')/Configurations"
         response = requests.get(
             url,
             headers={"Authorization": f"Bearer {token}"}
         )
-        
+
         if response.status_code == 401:
             api_token_manager.refresh_token()
             token = api_token_manager.get_token()
@@ -930,30 +968,33 @@ def get_iflow_configuration(integration_flow_id: str, version: str = "active") -
                 url,
                 headers={"Authorization": f"Bearer {token}"}
             )
-        
+
         response.raise_for_status()
-        
+
         # Try JSON first, fall back to XML if needed
         try:
             data = response.json()
-        except:
+        except Exception:
             # Response is likely XML (OData Atom format)
             data = parse_odata_xml_response(response.text)
-        
+
         configurations = {}
         if "d" in data and "results" in data["d"]:
             for config in data["d"]["results"]:
                 param_key = config.get("ParameterKey")
                 param_value = config.get("ParameterValue")
                 configurations[param_key] = param_value
-        
-        return {
+
+        result = {
             "integration_flow_id": integration_flow_id,
             "version": version,
             "configurations": configurations
         }
-    
+        _log_response("get-iflow-configuration", result)
+        return result
+
     except Exception as e:
+        _log_error("get-iflow-configuration", e)
         return {"error": f"Failed to get configurations: {str(e)}"}
 
 #Tool 9
@@ -971,6 +1012,7 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
     Returns:
         Error/log text and metadata
     """
+    _log_call("get-message-logs", message_id=message_id)
     try:
         # ---------------------------------------
         # 1. Get OAuth token (API OAuth)
@@ -1004,21 +1046,26 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
         # 4. Handle response
         # ---------------------------------------
         if response.status_code == 200:
-            return {
+            result = {
                 "success": True,
                 "message_id": message_id,
                 "logs": response.text,
                 "log_length": len(response.text)
             }
+            _log_response("get-message-logs", {"success": True, "log_length": result["log_length"]})
+            return result
 
-        return {
+        result = {
             "success": False,
             "message_id": message_id,
             "status_code": response.status_code,
             "error": response.text
         }
+        _log_response("get-message-logs", result)
+        return result
 
     except Exception as e:
+        _log_error("get-message-logs", e)
         return {
             "success": False,
             "message_id": message_id,
@@ -1041,6 +1088,10 @@ def create_wbs(
         planned_end_date: Planned end date in YYYY-MM-DD format (e.g. "2026-10-30")
         project_profile_code: SAP project profile code (default: "ZMCRPPM")
     """
+    _log_call("create_wbs",
+              planned_start_date=planned_start_date,
+              planned_end_date=planned_end_date,
+              project_profile_code=project_profile_code)
     suffix = random.randint(100, 999)
     project_external_id = f"14000000000000{suffix}"
 
@@ -1081,11 +1132,13 @@ def create_wbs(
     except Exception:
         response_body = response.text
 
-    return {
+    result = {
         "status_code": response.status_code,
         "project_external_id": project_external_id,
         "response_body": response_body
     }
+    _log_response("create_wbs", result)
+    return result
 
 
 _MAINTENANCE_ORDER_PAYLOAD = {
@@ -1143,6 +1196,7 @@ _MAINTENANCE_ORDER_PAYLOAD = {
 )
 def create_maintenance_order() -> Dict[str, Any]:
     """ Creates a Maintenance Order in SAP with a predefined standard payload. """
+    _log_call("create_maintenance_order")
     url = f"{CPI_BASE_URL}/http/create_maintenance_order"
     payload = json.dumps(_MAINTENANCE_ORDER_PAYLOAD)
 
@@ -1175,7 +1229,9 @@ def create_maintenance_order() -> Dict[str, Any]:
     except Exception:
         response_body = response.text
 
-    return {
+    result = {
         "status_code": response.status_code,
         "response_body": response_body
     }
+    _log_response("create_maintenance_order", result)
+    return result
