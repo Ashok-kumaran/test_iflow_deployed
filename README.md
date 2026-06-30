@@ -15,6 +15,8 @@ An MCP (Model Context Protocol) server built with [FastMCP](https://github.com/j
 | `test_iflow_with_sample_payload` | Auto-generate a sample payload and test an iFlow endpoint |
 | `test_iflow_with_user_payload` | Send a user-provided payload to an iFlow endpoint |
 | `generate_sample_payload` | Analyze an iFlow and generate a realistic test payload via LLM |
+| `create_wbs` | Create a WBS element in SAP via the CPI iFlow endpoint (auto-generates a unique ProjectExternalID) |
+| `create_maintenance_order` | Create a Maintenance Order in SAP via the CPI iFlow endpoint using a fixed standard payload |
 | `download-iflow` | Download and extract iFlow ZIP, returning its structure and metadata |
 | `get-iflow-endpoint` | Resolve the runtime endpoint URL via OData API |
 | `get-iflow-configuration` | Retrieve iFlow configuration parameters |
