@@ -1264,3 +1264,91 @@ def create_maintenance_order() -> Dict[str, Any]:
     }
     _log_response("create_maintenance_order", result)
     return result
+
+
+#Tool 12
+@mcp.tool(
+    name="health",
+    description=(
+        "Check the health and connectivity of the MCP server and its SAP CPI connections. "
+        "Verifies that all required environment variables are configured, tests OAuth token acquisition for both "
+        "the Design-time API and the CPI Runtime, and performs a lightweight GET to both base URLs to confirm network reachability. "
+        "Call this tool first when something seems broken — it will pinpoint whether the issue is misconfiguration, "
+        "expired credentials, or a network/firewall problem. "
+        "Returns a per-check status ('ok' or 'error'), an overall 'healthy' boolean, and error messages where applicable. "
+        "No parameters required."
+    )
+)
+def health() -> Dict[str, Any]:
+    _log_call("health")
+    checks: Dict[str, Any] = {}
+
+    # --- 1. Environment variables ---
+    env_issues = []
+    if not API_BASE_URL:
+        env_issues.append("API_BASE_URL missing")
+    if not CPI_BASE_URL:
+        env_issues.append("CPI_BASE_URL missing")
+    if not all([API_OAUTH_CLIENT_ID, API_OAUTH_CLIENT_SECRET, API_OAUTH_TOKEN_URL]):
+        env_issues.append("API OAuth vars incomplete (API_OAUTH_CLIENT_ID / API_OAUTH_CLIENT_SECRET / API_OAUTH_TOKEN_URL)")
+    if CPI_AUTH_METHOD.lower() == "basic" and not all([CPI_BASIC_AUTH_USERNAME, CPI_BASIC_AUTH_PASSWORD]):
+        env_issues.append("CPI Basic Auth vars incomplete (CPI_BASIC_AUTH_USERNAME / CPI_BASIC_AUTH_PASSWORD)")
+    if CPI_AUTH_METHOD.lower() == "oauth" and not all([CPI_OAUTH_CLIENT_ID, CPI_OAUTH_CLIENT_SECRET, CPI_OAUTH_TOKEN_URL]):
+        env_issues.append("CPI OAuth vars incomplete (CPI_OAUTH_CLIENT_ID / CPI_OAUTH_CLIENT_SECRET / CPI_OAUTH_TOKEN_URL)")
+
+    checks["env_vars"] = {"status": "ok" if not env_issues else "error", "issues": env_issues}
+
+    # --- 2. API OAuth token (Design-time) ---
+    try:
+        api_token_manager.refresh_token()
+        checks["api_oauth"] = {"status": "ok", "token_url": API_OAUTH_TOKEN_URL}
+    except Exception as e:
+        checks["api_oauth"] = {"status": "error", "token_url": API_OAUTH_TOKEN_URL, "error": str(e)}
+
+    # --- 3. CPI Runtime auth ---
+    try:
+        runtime_headers: Dict[str, str] = {}
+        auth_method_used, _, runtime_headers = _resolve_runtime_auth(runtime_headers)
+        checks["cpi_auth"] = {"status": "ok", "auth_method": auth_method_used}
+    except Exception as e:
+        checks["cpi_auth"] = {"status": "error", "error": str(e)}
+
+    # --- 4. API base URL reachability ---
+    try:
+        token = api_token_manager.get_token()
+        resp = requests.get(
+            f"{API_BASE_URL}/IntegrationPackages?$top=1",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=10
+        )
+        checks["api_connectivity"] = {
+            "status": "ok" if resp.status_code < 400 else "error",
+            "url": API_BASE_URL,
+            "http_status": resp.status_code
+        }
+    except Exception as e:
+        checks["api_connectivity"] = {"status": "error", "url": API_BASE_URL, "error": str(e)}
+
+    # --- 5. CPI Runtime base URL reachability ---
+    try:
+        ping_headers: Dict[str, str] = {"Accept": "*/*"}
+        rt_auth_method, rt_auth, ping_headers = _resolve_runtime_auth(ping_headers)
+        resp = requests.get(
+            CPI_BASE_URL,
+            headers=ping_headers,
+            auth=rt_auth,
+            timeout=10,
+            allow_redirects=True
+        )
+        checks["cpi_connectivity"] = {
+            "status": "ok" if resp.status_code < 500 else "error",
+            "url": CPI_BASE_URL,
+            "http_status": resp.status_code
+        }
+    except Exception as e:
+        checks["cpi_connectivity"] = {"status": "error", "url": CPI_BASE_URL, "error": str(e)}
+
+    overall = all(c.get("status") == "ok" for c in checks.values())
+    result = {"healthy": overall, "checks": checks}
+    _log_response("health", result)
+    return result
