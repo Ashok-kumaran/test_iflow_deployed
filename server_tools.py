@@ -11,6 +11,7 @@ This FastMCP server provides tools to:
 import os
 import io
 import json
+import random
 import zipfile
 import requests
 import xml.etree.ElementTree as ET
@@ -20,9 +21,6 @@ from datetime import datetime, timedelta
 from fastmcp import FastMCP
 from _tool._get_an_integration_package_tool import get_an_integration_package_tool
 from _tool._get_all_integration_package_tool import get_all_integration_package_tool
-
-from _tool._create_wbs_tool import create_wbs_tool
-from _tool._create_maintenance_order_tool import create_maintenance_order_tool
 
 try:
     from dotenv import load_dotenv
@@ -1032,42 +1030,152 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
     name="create_wbs",
     description="Creates a WBS element in SAP via the CPI iFlow endpoint. Auto-generates a unique ProjectExternalID on each call."
 )
-async def create_wbs(
+def create_wbs(
     planned_start_date: str,
     planned_end_date: str,
     project_profile_code: str = "ZMCRPPM"
-):
+) -> Dict[str, Any]:
     """
     Args:
         planned_start_date: Planned start date in YYYY-MM-DD format (e.g. "2026-05-13")
         planned_end_date: Planned end date in YYYY-MM-DD format (e.g. "2026-10-30")
         project_profile_code: SAP project profile code (default: "ZMCRPPM")
     """
+    suffix = random.randint(100, 999)
+    project_external_id = f"14000000000000{suffix}"
+
+    payload = json.dumps({
+        "ProjectProfileCode": project_profile_code,
+        "ProjectExternalID": project_external_id,
+        "PlannedStartDate": planned_start_date,
+        "PlannedEndDate": planned_end_date
+    })
+
+    url = f"{CPI_BASE_URL}/http/create_wbs"
+    session = requests.Session()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    auth_method_used, auth, headers = _resolve_runtime_auth(headers)
+
+    csrf_token = _get_csrf_token_with_fallback(session, headers, auth_method_used, [url])
+    if csrf_token:
+        headers["X-CSRF-Token"] = csrf_token
+
+    response = _send_http_request(session, "POST", url, payload, headers, auth)
+
+    if response.status_code in (401, 403):
+        if auth_method_used == "oauth":
+            runtime_token_manager.refresh_token()
+            headers["Authorization"] = f"Bearer {runtime_token_manager.get_token()}"
+        csrf_token_manager.reset_failure_tracking(url, auth_method=auth_method_used)
+        csrf_token = _get_csrf_token_with_fallback(session, headers, auth_method_used, [url])
+        if csrf_token:
+            headers["X-CSRF-Token"] = csrf_token
+        else:
+            headers.pop("X-CSRF-Token", None)
+        response = _send_http_request(session, "POST", url, payload, headers, auth)
+
+    response.raise_for_status()
+
     try:
-        results = await create_wbs_tool(planned_start_date, planned_end_date, project_profile_code)
-        return results
+        response_body = response.json()
+    except Exception:
+        response_body = response.text
 
-    except Exception as e:
-        print(f"===> Exception in create_wbs function: {e}")
-        raise
+    return {
+        "status_code": response.status_code,
+        "project_external_id": project_external_id,
+        "response_body": response_body
+    }
 
-    finally:
-        pass
+
+_MAINTENANCE_ORDER_PAYLOAD = {
+    "MaintenanceOrderType": "YBA1",
+    "MaintenanceOrderDesc": "Test",
+    "MaintOrdBasicStartDateTime": "2026-06-04T10:40:00+05:30",
+    "MaintOrdBasicEndDateTime": "2026-07-22T07:17:00+05:30",
+    "MainWorkCenter": "RES-0100",
+    "MainWorkCenterPlant": "1710",
+    "MaintenancePlanningPlant": "1710",
+    "MaintenancePlant": "1710",
+    "FunctionalLocation": "1710-SPA-SAC-PLAR1-CLR2",
+    "to_MaintenanceOrderOperation": {
+        "results": [
+            {
+                "MaintenanceOrderOperation": "0010",
+                "MaintenanceOrderSubOperation": "",
+                "OperationControlKey": "YBM1",
+                "WorkCenter": "RES-0100",
+                "Plant": "1710",
+                "OperationDescription": "OP1",
+                "NumberOfCapacities": 0,
+                "OperationWorkPercent": 0,
+                "OperationCalculationControl": "",
+                "ActivityType": "",
+                "DeliveryTimeInDays": "0",
+                "MaintenanceObjectListItem": 0,
+                "AllMaintOrdCompCmtdQtsAreKept": False,
+                "to_MaintOrderOpComponent_2": {
+                    "results": [
+                        {
+                            "Product": "SP001",
+                            "BaseUnit": "PC",
+                            "Plant": "1710",
+                            "QuantityInUnitOfEntry": "1",
+                            "MaintComponentItemCategory": "L",
+                            "GoodsMovementIsAllowed": True,
+                            "QuantityIsFixed": True,
+                            "MatlCompIsMarkedForBackflush": False,
+                            "MaintOrdOpCompIsBulkProduct": False,
+                            "RqmtDateIsEnteredManually": False,
+                            "SrvcSchedgIsAlignedWthOpWrkCtr": False
+                        }
+                    ]
+                }
+            }
+        ]
+    }
+}
 
 #Tool 11
 @mcp.tool(
     name="create_maintenance_order",
     description="Creates a Maintenance Order in SAP via the CPI iFlow endpoint using a fixed standard payload."
 )
-async def create_maintenance_order():
+def create_maintenance_order() -> Dict[str, Any]:
     """ Creates a Maintenance Order in SAP with a predefined standard payload. """
+    url = f"{CPI_BASE_URL}/http/create_maintenance_order"
+    payload = json.dumps(_MAINTENANCE_ORDER_PAYLOAD)
+
+    session = requests.Session()
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    auth_method_used, auth, headers = _resolve_runtime_auth(headers)
+
+    csrf_token = _get_csrf_token_with_fallback(session, headers, auth_method_used, [url])
+    if csrf_token:
+        headers["X-CSRF-Token"] = csrf_token
+
+    response = _send_http_request(session, "POST", url, payload, headers, auth)
+
+    if response.status_code in (401, 403):
+        if auth_method_used == "oauth":
+            runtime_token_manager.refresh_token()
+            headers["Authorization"] = f"Bearer {runtime_token_manager.get_token()}"
+        csrf_token_manager.reset_failure_tracking(url, auth_method=auth_method_used)
+        csrf_token = _get_csrf_token_with_fallback(session, headers, auth_method_used, [url])
+        if csrf_token:
+            headers["X-CSRF-Token"] = csrf_token
+        else:
+            headers.pop("X-CSRF-Token", None)
+        response = _send_http_request(session, "POST", url, payload, headers, auth)
+
+    response.raise_for_status()
+
     try:
-        results = await create_maintenance_order_tool()
-        return results
+        response_body = response.json()
+    except Exception:
+        response_body = response.text
 
-    except Exception as e:
-        print(f"===> Exception in create_maintenance_order function: {e}")
-        raise
-
-    finally:
-        pass
+    return {
+        "status_code": response.status_code,
+        "response_body": response_body
+    }
