@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from fastmcp import FastMCP
 from _tool._get_an_integration_package_tool import get_an_integration_package_tool
 from _tool._get_all_integration_package_tool import get_all_integration_package_tool
-from _tool._get_an_integration_flow_of_an_integration_package_tool import get_an_integration_flow_of_an_integration_package_tool
+
 from _tool._create_wbs_tool import create_wbs_tool
 from _tool._create_maintenance_order_tool import create_maintenance_order_tool
 
@@ -573,88 +573,7 @@ def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
         return {"error": f"Failed to get endpoint: {str(e)}"}
 
 
-# def _analyze_iflow_for_payload_internal(integration_flow_id: str, version: str = "active") -> str:
-#     """Internal function to analyze iFlow - used by both tool and other functions"""
-#     # Download and parse the iFlow
-#     iflow_data = _download_iflow_internal(integration_flow_id, version)
-    
-#     if "error" in iflow_data:
-#         return f"Error: {iflow_data['error']}"
-    
-#     metadata = iflow_data.get("metadata", {})
-    
-#     # Build comprehensive analysis
-#     analysis = f"""
-# === SAP CPI iFlow Analysis for Payload Generation ===
-
-# Integration Flow ID: {integration_flow_id}
-# Version: {version}
-
-# --- Adapter Information ---
-# Sender Adapters: {', '.join(metadata.get('sender_adapters', ['Not detected']))}
-# Receiver Adapters: {', '.join(metadata.get('receiver_adapters', ['Not detected']))}
-
-# --- Data Format ---
-# Expected Format: {metadata.get('data_format', 'Unknown')}
-# HTTP Method: {metadata.get('http_method', 'POST')}
-
-# --- Processing Capabilities ---
-# Has Data Mapping: {metadata.get('has_mapping', False)}
-# Has Scripting/Transformation: {metadata.get('has_scripting', False)}
-
-# --- Available Schemas ---
-# """
-    
-#     # Add schema information if available
-#     if "schemas" in iflow_data:
-#         analysis += f"Found {len(iflow_data['schemas'])} XSD schema(s):\n"
-#         for schema_name, schema_content in iflow_data['schemas'].items():
-#             analysis += f"\n--- Schema: {schema_name} ---\n"
-#             # Extract root elements from schema
-#             try:
-#                 schema_root = ET.fromstring(schema_content)
-#                 elements = schema_root.findall('.//{http://www.w3.org/2001/XMLSchema}element[@name]')
-#                 if elements:
-#                     element_names = [name for elem in elements[:5] if (name := elem.get('name')) is not None]
-#                     analysis += "Root elements: " + ', '.join(element_names) + "\n"
-#                     analysis += f"\nSchema Content (first 1000 chars):\n{schema_content[:1000]}\n"
-#             except:
-#                 analysis += "Schema parsing failed\n"
-#     else:
-#         analysis += "No XSD schemas found in iFlow package\n"
-    
-#     analysis += """
-# --- Recommended Actions for LLM ---
-# Based on this analysis, please generate a realistic sample payload that:
-# 1. Matches the expected data format (JSON/XML)
-# 2. Contains realistic business data (e.g., order, customer, product info)
-# 3. Includes all required fields based on schemas (if available)
-# 4. Uses appropriate data types and structures
-# 5. Can be used to test the iFlow end-to-end
-
-# Please generate a complete, valid sample payload suitable for testing this iFlow.
-# """
-    
-#     return analysis
-
-# #Tool 5
-# @mcp.tool(name = "analyze-iflow-for-payload")
-# def analyze_iflow_for_payload(integration_flow_id: str, version: str = "active") -> str:
-#     """
-#     Analyze an iFlow and provide detailed information to help generate a sample payload.
-#     This tool downloads the iFlow, parses its structure, and returns comprehensive
-#     information that an LLM can use to generate appropriate test payloads.
-    
-#     Args:
-#         integration_flow_id: The ID of the integration flow to analyze
-#         version: Version to analyze (default: "active")
-    
-#     Returns:
-#         Formatted string containing iFlow analysis for LLM payload generation
-#     """
-#     return _analyze_iflow_for_payload_internal(integration_flow_id, version)
-
-#Tool 6
+#Tool 5
 @mcp.tool(name = "generate-sample-payload-with-llm")
 def generate_sample_payload_with_llm(
     integration_flow_id: str,
@@ -984,64 +903,7 @@ def test_iflow_with_payload(
         }
     }
 
-#Tool 8
-# @mcp.tool(name = "test-iflow-with-sample-payload", description=" Complete end-to-end test: Analyze iFlow, generate sample payload, and test.")
-# def test_iflow_with_sample_payload(
-#     integration_flow_id: str,
-#     endpoint_path: str,
-#     version: str = "active"
-# ) -> str:
-#     """
-#     Complete end-to-end test: Analyze iFlow, generate sample payload, and test.
-    
-#     This is a comprehensive testing tool that:
-#     1. Downloads and analyzes the iFlow
-#     2. Provides analysis for LLM to generate payload
-#     3. Returns instructions for completing the test
-    
-#     Args:
-#         integration_flow_id: The ID of the integration flow to test
-#         endpoint_path: The endpoint path for the iFlow
-#         version: Version to test (default: "active")
-    
-#     Returns:
-#         Formatted instructions for completing the end-to-end test
-#     """
-#     # Get iFlow analysis
-#     analysis = _analyze_iflow_for_payload_internal(integration_flow_id, version)
-    
-#     if "Error:" in analysis:
-#         return analysis
-    
-#     instructions = f"""
-# === iFlow End-to-End Test Instructions ===
-
-# {analysis}
-
-# --- Next Steps ---
-# 1. Review the iFlow analysis above
-# 2. Generate an appropriate sample payload based on the analysis
-# 3. Use the test_iflow_with_payload tool with:
-#    - integration_flow_id: {integration_flow_id}
-#    - payload: <your generated payload>
-#    - endpoint_path: {endpoint_path}
-#    - content_type: (application/json or application/xml based on analysis)
-#    - http_method: (from analysis)
-
-# 4. Review the test results for:
-#    - HTTP status code (200-299 = success)
-#    - Response body and headers
-#    - Any error messages
-#    - Data transformation correctness
-
-# --- Endpoint Information ---
-# Endpoint Path: {endpoint_path}
-# Full URL will be: {CPI_BASE_URL}/http{endpoint_path}
-# """
-    
-#     return instructions
-
-#Tool 9
+#Tool 7
 @mcp.tool(name = "get-iflow-configuration")
 def get_iflow_configuration(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
     """
@@ -1096,26 +958,7 @@ def get_iflow_configuration(integration_flow_id: str, version: str = "active") -
     except Exception as e:
         return {"error": f"Failed to get configurations: {str(e)}"}
 
-# #Tool 10
-# @mcp.tool(name="get-all-iflow", description="Get all integration flows in an integration package. Args: integration_package_id: Integration Package ID, integration_flow_id: Integration Flow ID, version: 'active' or explicit version (e.g. 1.0.5)")
-# async def get_an_integration_flow_of_an_integration_package(
-#     integration_package_id: str,
-#     integration_flow_id: str,
-#     version: str = "active",
-# ):
-
-#     try:
-#         results = await get_an_integration_flow_of_an_integration_package_tool(
-#             integration_package_id,
-#             integration_flow_id,
-#             version,
-#         )
-#         return results
-#     except Exception as e:
-        print(f"===> Exception in get_an_integration_flow_of_an_integration_package: {e}")
-        raise
-
-#Tool 10
+#Tool 9
 @mcp.tool(
     name="get-message-logs",
     description="Fetch SAP CPI message processing error/log details using message ID"
@@ -1184,7 +1027,7 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
             "error": str(e)
         }
 
-#Tool 11
+#Tool 10
 @mcp.tool(
     name="create_wbs",
     description="Creates a WBS element in SAP via the CPI iFlow endpoint. Auto-generates a unique ProjectExternalID on each call."
@@ -1211,7 +1054,7 @@ async def create_wbs(
     finally:
         pass
 
-#Tool 12
+#Tool 11
 @mcp.tool(
     name="create_maintenance_order",
     description="Creates a Maintenance Order in SAP via the CPI iFlow endpoint using a fixed standard payload."
