@@ -1,6 +1,7 @@
 sap-ai-sdk-gen
 python-dotenv
 langchain
+langchain-openai>=0.3.0
 httpx
 fastmcp
 fastapi

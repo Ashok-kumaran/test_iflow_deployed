@@ -31,6 +31,14 @@ applications:
     CPI_OAUTH_TOKEN_URL : https://cpi-sbx.authentication.us10.hana.ondemand.com/oauth/token
     CPI_BASE_URL : https://cpi-sbx.it-cpi019-rt.cfapps.us10-002.hana.ondemand.com
 
+    #LLM USAGE MONITOR
+    LLM_USAGE_MONITOR_APP_ID : 26
+    LLM_USAGE_MONITOR_MODEL_NAME : gpt-5
+    LLM_USAGE_MONITOR_CALL_TYPE_L_INVOKE : l_invoke"
+    LLM_USAGE_MONITOR_CALL_TYPE_A_INVOKE : a_invoke
+    LLM_USAGE_MONITOR_BASE_URL : https://llm-usage-monitor-egregious-armadillo-bt.cfapps.us10-001.hana.ondemand.com
+    LLM_USAGE_MONITOR_API_KEY : b12f690ae663d6b94627239703a9dfb1bf41f2750178ab5fa8c3a086a23bf8f0
+
 
     CPI_BASIC_AUTH_USERNAME : p.karthikeyan@sierradigitalinc.com
     CPI_BASIC_AUTH_PASSWORD : Prasanth@8055

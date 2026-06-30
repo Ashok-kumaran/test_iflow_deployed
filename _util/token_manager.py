@@ -15,6 +15,10 @@ CPI_OAUTH_CLIENT_ID = os.getenv("CPI_OAUTH_CLIENT_ID")
 CPI_OAUTH_CLIENT_SECRET = os.getenv("CPI_OAUTH_CLIENT_SECRET")
 CPI_OAUTH_TOKEN_URL = os.getenv("CPI_OAUTH_TOKEN_URL")
 
+AICORE_CLIENT_ID = os.getenv("AICORE_CLIENT_ID")
+AICORE_CLIENT_SECRET = os.getenv("AICORE_CLIENT_SECRET")
+AICORE_AUTH_URL = os.getenv("AICORE_AUTH_URL")
+
 class TokenManager:
     # these are like global variables that are shared across the server untill server stops
     # so only one application level token, not like an user level token or new token for each tool
@@ -167,6 +171,61 @@ class CPITokenManager:
 
         finally:
             pass
+
+
+class AICoreTokenManager:
+    _access_token: str | None = None
+    _expires_at: float = 0.0
+    _lock = asyncio.Lock()
+
+    @classmethod
+    async def get_token(cls) -> str:
+        async with cls._lock:
+            now = time.time()
+            if cls._access_token and now < cls._expires_at:
+                return cls._access_token
+            token, expires_in = await cls._fetch_new_token()
+            cls._access_token = token
+            cls._expires_at = now + expires_in - 60
+            return cls._access_token
+
+    @staticmethod
+    async def _fetch_new_token() -> tuple[str, int]:
+        if not AICORE_AUTH_URL or not AICORE_CLIENT_ID or not AICORE_CLIENT_SECRET:
+            raise ValueError("SAP AI Core OAuth configuration is missing")
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    AICORE_AUTH_URL,
+                    data={"grant_type": "client_credentials"},
+                    auth=(AICORE_CLIENT_ID, AICORE_CLIENT_SECRET),
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+            response.raise_for_status()
+            data = response.json()
+            return data["access_token"], data["expires_in"]
+
+        except httpx.HTTPStatusError as e:
+            print(f"""===> Exception in AiCore get_access_token function [HTTPStatusError]: {e}
+                        status code: {e.response.status_code}
+                        response text: {e.response.text}""")
+            raise
+
+        except httpx.RequestError as e:
+            print(f"===> Exception in AiCore get_access_token function [RequestError]: {e}")
+            raise
+
+        except JSONDecodeError as e:
+            print(f"===> Exception in AiCore get_access_token function [JSONDecodeError]: {e}")
+            raise
+
+        except KeyError as e:
+            print(f"===> Exception in AiCore get_access_token function [KeyError]: {e}")
+            raise
+
+        except Exception as e:
+            print(f"===> Exception in AiCore get_access_token function [Exception]: {e}")
+            raise
 
 
 if __name__ == "__main__":

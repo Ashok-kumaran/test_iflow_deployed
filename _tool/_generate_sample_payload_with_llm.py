@@ -7,10 +7,16 @@ import io
 from typing import Dict, Any, Union, List
 from json import JSONDecodeError
 from dotenv import load_dotenv
-from _util.token_manager import TokenManager, CPITokenManager
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from _util.token_manager import TokenManager, CPITokenManager, AICoreTokenManager
+from monitoring.llm_monitor import log_llm_invoke
 
 load_dotenv()
 API_BASE_URL: str = os.getenv("API_BASE_URL", "")
+AICORE_BASE_URL: str = os.getenv("AICORE_BASE_URL", "")
+LLM_DEPLOYMENT_ID: str = os.getenv("LLM_DEPLOYMENT_ID", "")
+AICORE_RESOURCE_GROUP: str = os.getenv("AICORE_RESOURCE_GROUP", "default")
 
 
 async def generate_sample_payload_with_llm(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
@@ -401,20 +407,37 @@ Return a JSON object that represents the sample payload. For example:
 **Important:** Do not include any explanatory text. Return ONLY the payload.
 """
 
-    # In a real implementation, you would call an LLM API here
-    # For now, we'll generate a smart default based on the analysis
-    
-    # Smart default generation based on analysis
+    # Try real LLM call via SAP AI Core (OpenAI-compatible endpoint)
+    if AICORE_BASE_URL and LLM_DEPLOYMENT_ID:
+        try:
+            token = await AICoreTokenManager.get_token()
+            llm = ChatOpenAI(
+                model="gpt-4",
+                base_url=f"{AICORE_BASE_URL}/v2/inference/deployments/{LLM_DEPLOYMENT_ID}",
+                api_key=token,
+                default_headers={"AI-Resource-Group": AICORE_RESOURCE_GROUP},
+                temperature=0,
+            )
+            response = await llm.ainvoke([HumanMessage(content=prompt)])
+            log_llm_invoke(response)
+            content = response.content.strip()
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            return json.loads(content)
+        except Exception as e:
+            print(f"===> LLM call failed, falling back to rule-based generation: {e}")
+
+    # Fallback: rule-based generation based on adapter type
     adapter_type = flow_analysis.get('adapter_type', 'unknown')
-    
+
     if adapter_type == 'SOAP':
-        # Generate XML payload for SOAP
         return {
             "message": f"<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'><soap:Body><TestMessage><id>12345</id><text>Test message for {integration_flow_id}</text></TestMessage></soap:Body></soap:Envelope>"
         }
-    
+
     elif adapter_type == 'REST':
-        # Generate JSON payload for REST
         return {
             "id": "12345",
             "message": f"Test message for {integration_flow_id}",
@@ -424,21 +447,18 @@ Return a JSON object that represents the sample payload. For example:
                 "status": "active"
             }
         }
-    
+
     elif adapter_type == 'IDoc':
-        # Generate IDoc XML payload
         return {
             "message": f"<?xml version='1.0'?><IDOC><E1EDK03><MSGFN>004</MSGFN><DOCNUM>12345</DOCNUM><TEST>Test IDoc for {integration_flow_id}</TEST></E1EDK03></IDOC>"
         }
-    
+
     elif adapter_type == 'File':
-        # Generate file content
         return {
             "message": f"Test file content for {integration_flow_id}\nLine 1: Test data\nLine 2: More test data\n"
         }
-    
+
     elif adapter_type == 'JMS':
-        # Generate JMS message
         return {
             "message": f"Test JMS message for {integration_flow_id}",
             "properties": {
@@ -449,9 +469,8 @@ Return a JSON object that represents the sample payload. For example:
                 "data": "Sample payload"
             }
         }
-    
+
     elif adapter_type == 'RFC':
-        # Generate RFC structure
         return {
             "message": f"Test RFC call for {integration_flow_id}",
             "function": "TEST_FUNCTION",
@@ -460,9 +479,8 @@ Return a JSON object that represents the sample payload. For example:
                 "EXPORTING": {"PARAM2": "value2"}
             }
         }
-    
+
     else:
-        # Generic JSON payload
         return {
             "message": f"Test message for integration flow: {integration_flow_id}",
             "timestamp": "2024-01-01T00:00:00Z",
