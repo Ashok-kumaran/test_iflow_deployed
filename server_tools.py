@@ -21,6 +21,8 @@ from fastmcp import FastMCP
 from _tool._get_an_integration_package_tool import get_an_integration_package_tool
 from _tool._get_all_integration_package_tool import get_all_integration_package_tool
 from _tool._get_an_integration_flow_of_an_integration_package_tool import get_an_integration_flow_of_an_integration_package_tool
+from _tool._create_wbs_tool import create_wbs_tool
+from _tool._create_maintenance_order_tool import create_maintenance_order_tool
 
 try:
     from dotenv import load_dotenv
@@ -1181,3 +1183,48 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
             "message_id": message_id,
             "error": str(e)
         }
+
+#Tool 11
+@mcp.tool(
+    name="create_wbs",
+    description="Creates a WBS element in SAP via the CPI iFlow endpoint. Auto-generates a unique ProjectExternalID on each call."
+)
+async def create_wbs(
+    planned_start_date: str,
+    planned_end_date: str,
+    project_profile_code: str = "ZMCRPPM"
+):
+    """
+    Args:
+        planned_start_date: Planned start date in YYYY-MM-DD format (e.g. "2026-05-13")
+        planned_end_date: Planned end date in YYYY-MM-DD format (e.g. "2026-10-30")
+        project_profile_code: SAP project profile code (default: "ZMCRPPM")
+    """
+    try:
+        results = await create_wbs_tool(planned_start_date, planned_end_date, project_profile_code)
+        return results
+
+    except Exception as e:
+        print(f"===> Exception in create_wbs function: {e}")
+        raise
+
+    finally:
+        pass
+
+#Tool 12
+@mcp.tool(
+    name="create_maintenance_order",
+    description="Creates a Maintenance Order in SAP via the CPI iFlow endpoint using a fixed standard payload."
+)
+async def create_maintenance_order():
+    """ Creates a Maintenance Order in SAP with a predefined standard payload. """
+    try:
+        results = await create_maintenance_order_tool()
+        return results
+
+    except Exception as e:
+        print(f"===> Exception in create_maintenance_order function: {e}")
+        raise
+
+    finally:
+        pass
