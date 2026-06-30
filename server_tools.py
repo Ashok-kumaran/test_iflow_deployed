@@ -481,7 +481,15 @@ def _download_iflow_internal(integration_flow_id: str, version: str = "active") 
         return {"error": f"Failed to download iFlow: {str(e)}"}
 
 #Tool 1 find-package-by-id
-@mcp.tool(name="get_integration_package_by_id", description="Fetch an SAP CPI Integration Package by its ID.")
+@mcp.tool(
+    name="get_integration_package_by_id",
+    description=(
+        "Fetch details of a single SAP CPI Integration Package by its exact ID. "
+        "Use this when you already know the package ID and need its metadata such as name, version, short text, and vendor. "
+        "Returns package details as a JSON object. "
+        "If you don't know the package ID yet, call get_all_integration_packages first to discover available packages."
+    )
+)
 async def get_an_integration_package(integration_package_id: str):
     """
     Args:
@@ -497,7 +505,15 @@ async def get_an_integration_package(integration_package_id: str):
         raise
 
 #Tool 2 get-all-packages
-@mcp.tool(name="get_all_integration_packages",  description="List all SAP CPI Integration Packages.")
+@mcp.tool(
+    name="get_all_integration_packages",
+    description=(
+        "List all SAP CPI Integration Packages available in the tenant. "
+        "Use this as a discovery step to find package IDs before working with specific packages or their integration flows. "
+        "Returns a list of packages, each with an ID, name, short description, version, and vendor. "
+        "Once you have a package ID, use get_integration_package_by_id for details or download-iflow to inspect a specific flow inside that package."
+    )
+)
 async def get_all_integration_package():
     """ Returns all integration packages available in the tenant. """
     _log_call("get_all_integration_packages")
@@ -510,35 +526,34 @@ async def get_all_integration_package():
         raise
 
 #Tool 3
-@mcp.tool(name = "download-iflow")
+@mcp.tool(
+    name="download-iflow",
+    description=(
+        "Download an SAP CPI Integration Flow (iFlow) as a ZIP and extract its internals. "
+        "Returns the list of files in the ZIP, the raw iFlow definition XML (.iflw), any XSD schemas, "
+        "and parsed metadata including sender/receiver adapters, HTTP method, data format, and whether the flow uses mapping or scripting. "
+        "Use this before generate-sample-payload-with-llm to understand the iFlow structure. "
+        "Parameters: integration_flow_id (required) — the iFlow artifact ID; version (optional, default 'active')."
+    )
+)
 def download_iflow(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
-    """
-    Download an SAP CPI integration flow as a ZIP file and extract its structure.
-
-    Args:
-        integration_flow_id: The ID of the integration flow to download
-        version: Version to download (default: "active")
-
-    Returns:
-        Dictionary containing iFlow metadata and structure
-    """
     _log_call("download-iflow", integration_flow_id=integration_flow_id, version=version)
     result = _download_iflow_internal(integration_flow_id, version)
     _log_response("download-iflow", result)
     return result
 
 #Tool 4
-@mcp.tool(name = "get-iflow-endpoint")
+@mcp.tool(
+    name="get-iflow-endpoint",
+    description=(
+        "Get the live runtime HTTP endpoint URL for a deployed SAP CPI Integration Flow. "
+        "Use this when you need to know the exact URL to call the iFlow (e.g., before using test-iflow-with-payload). "
+        "The iFlow must already be deployed to the runtime for this to return results — design-time only artifacts will return no endpoints. "
+        "Returns the endpoint URL string. "
+        "Parameter: integration_flow_id — the iFlow artifact ID or its display name."
+    )
+)
 def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
-    """
-    Get the runtime endpoints for a deployed integration flow using the OData API.
-
-    Args:
-        integration_flow_id: The ID or Name of the integration flow
-
-    Returns:
-        Dictionary containing endpoint information
-    """
     _log_call("get-iflow-endpoint", integration_flow_id=integration_flow_id)
     try:
         token = api_token_manager.get_token()
@@ -600,26 +615,22 @@ def get_iflow_endpoint(integration_flow_id: str) -> Dict[str, Any]:
 
 
 #Tool 5
-@mcp.tool(name = "generate-sample-payload-with-llm")
+@mcp.tool(
+    name="generate-sample-payload-with-llm",
+    description=(
+        "Analyze an SAP CPI iFlow and produce a structured analysis that helps an LLM generate a realistic test payload. "
+        "Downloads the iFlow, inspects its adapters, data format (JSON/XML), HTTP method, XSD schemas, and scripting steps, "
+        "then returns that analysis together with LLM instructions. "
+        "The calling agent should read the returned 'analysis' and 'llm_instructions' fields and use them to generate the actual payload. "
+        "Call this BEFORE test-iflow-with-payload when you don't yet have a payload. "
+        "Parameters: integration_flow_id (required); llm_prompt (optional custom instruction override); version (optional, default 'active')."
+    )
+)
 def generate_sample_payload_with_llm(
     integration_flow_id: str,
     llm_prompt: Optional[str] = None,
     version: str = "active"
 ) -> Dict[str, Any]:
-    """
-    Use an LLM to generate a realistic sample payload for an SAP CPI iFlow.
-
-    This tool analyzes the iFlow structure and asks the LLM (via the calling agent)
-    to generate an appropriate test payload based on the iFlow's characteristics.
-
-    Args:
-        integration_flow_id: The ID of the integration flow
-        llm_prompt: Optional custom prompt for the LLM
-        version: Version to analyze (default: "active")
-
-    Returns:
-        Dictionary with analysis and instructions for payload generation
-    """
     _log_call("generate-sample-payload-with-llm", integration_flow_id=integration_flow_id, version=version)
     # Get comprehensive iFlow analysis
     iflow_data = _download_iflow_internal(integration_flow_id, version)
@@ -744,23 +755,22 @@ def _send_http_request(
 
 @mcp.tool(
     name="test-iflow-with-payload",
-    description="""
-Test an SAP CPI Integration Flow endpoint using a payload.
-
-Use this tool to send HTTP requests to CPI iFlow endpoints and validate responses.
-
-Parameters:
-- integration_flow_id: ID or name of the integration flow
-- endpoint_path: Relative endpoint path of the iFlow
-- payload: Request payload to send
-- content_type: Payload content type (default: application/json)
-- http_method: HTTP method (POST/GET/PUT/DELETE)
-- csrf_endpoint_path: Optional alternate path for fetching CSRF token
-- entity: Optional entity name (use when iFlow expects entity such as OData entity set, file entity, or custom header/query entity)
-
-Provide 'entity' only if the target iFlow requires it. 
-If not required, you can ignore it.
-"""
+    description=(
+        "Send an HTTP request to a deployed SAP CPI Integration Flow endpoint and validate the response. "
+        "Handles authentication (OAuth or Basic Auth) and CSRF token fetching automatically, with one retry on 401/403. "
+        "Returns a result dict with test_status ('SUCCESS' or 'FAILED'), http_status code, auth method used, csrf_token_used flag, "
+        "the full response body, and response headers. "
+        "Use get-iflow-endpoint first if you need the endpoint URL. "
+        "Use generate-sample-payload-with-llm first if you need help constructing the payload. "
+        "Parameters: "
+        "integration_flow_id (required) — iFlow artifact ID or name; "
+        "endpoint_path (required) — relative path after the base URL, e.g. 'http/my_iflow'; "
+        "payload (required) — request body as a string (JSON or XML); "
+        "content_type (optional, default 'application/json') — MIME type of the payload; "
+        "http_method (optional, default 'POST') — GET, POST, PUT, or DELETE; "
+        "csrf_endpoint_path (optional) — alternate relative path to fetch the CSRF token from if the main endpoint doesn't support it; "
+        "header (optional) — dict of additional HTTP headers to include in the request."
+    )
 )
 def test_iflow_with_payload(
     integration_flow_id: str,
@@ -939,18 +949,17 @@ def test_iflow_with_payload(
     return result
 
 #Tool 7
-@mcp.tool(name = "get-iflow-configuration")
+@mcp.tool(
+    name="get-iflow-configuration",
+    description=(
+        "Fetch the design-time configuration parameters (key/value pairs) of an SAP CPI Integration Flow. "
+        "Configuration parameters typically include adapter settings such as endpoint paths, target system URLs, and timeout values. "
+        "Use this to understand how an iFlow is configured before testing it, or to verify parameter values without downloading the full ZIP. "
+        "Returns a 'configurations' dict mapping ParameterKey → ParameterValue. "
+        "Parameters: integration_flow_id (required); version (optional, default 'active')."
+    )
+)
 def get_iflow_configuration(integration_flow_id: str, version: str = "active") -> Dict[str, Any]:
-    """
-    Get configuration parameters (key/value pairs) of an SAP CPI integration flow.
-
-    Args:
-        integration_flow_id: The ID of the integration flow
-        version: Version to query (default: "active")
-
-    Returns:
-        Dictionary containing configuration parameters
-    """
     _log_call("get-iflow-configuration", integration_flow_id=integration_flow_id, version=version)
     try:
         token = api_token_manager.get_token()
@@ -1000,7 +1009,14 @@ def get_iflow_configuration(integration_flow_id: str, version: str = "active") -
 #Tool 9
 @mcp.tool(
     name="get-message-logs",
-    description="Fetch SAP CPI message processing error/log details using message ID"
+    description=(
+        "Fetch the error details and full log text for a failed SAP CPI message using its Message Processing Log ID. "
+        "Use this to diagnose why an iFlow invocation failed — for example, when test-iflow-with-payload returns a non-2xx status "
+        "and you need to see the root cause error from the CPI runtime. "
+        "The message_id is typically visible in the CPI monitoring UI (Operations → Message Monitor) or returned in error response headers. "
+        "Returns 'logs' (raw error text), 'success' flag, and 'log_length'. "
+        "Parameter: message_id (required) — the GUID of the message processing log entry."
+    )
 )
 def get_message_logs(message_id: str) -> Dict[str, Any]:
     """
@@ -1075,7 +1091,14 @@ def get_message_logs(message_id: str) -> Dict[str, Any]:
 #Tool 10
 @mcp.tool(
     name="create_wbs",
-    description="Creates a WBS element in SAP via the CPI iFlow endpoint. Auto-generates a unique ProjectExternalID on each call."
+    description=(
+        "Create a WBS (Work Breakdown Structure) element in SAP S/4HANA via the CPI iFlow endpoint. "
+        "Automatically generates a unique 17-digit ProjectExternalID (base '14000000000000' + random 3-digit suffix) on every call, "
+        "so you do not need to provide one. "
+        "Required parameters: planned_start_date and planned_end_date — both in YYYY-MM-DD format (e.g. '2026-05-13'). "
+        "Optional: project_profile_code (default 'ZMCRPPM') — the SAP project profile that controls WBS behaviour. "
+        "Returns: status_code (HTTP), project_external_id (the auto-generated ID that was used), and the SAP response body."
+    )
 )
 def create_wbs(
     planned_start_date: str,
@@ -1192,7 +1215,13 @@ _MAINTENANCE_ORDER_PAYLOAD = {
 #Tool 11
 @mcp.tool(
     name="create_maintenance_order",
-    description="Creates a Maintenance Order in SAP via the CPI iFlow endpoint using a fixed standard payload."
+    description=(
+        "Create a Maintenance Order in SAP S/4HANA via the CPI iFlow endpoint. "
+        "No parameters are needed — the request payload is fully predefined: "
+        "order type YBA1, description 'Test', work center RES-0100, planning plant 1710, "
+        "functional location 1710-SPA-SAC-PLAR1-CLR2, one operation (0010, key YBM1) with component SP001 (quantity 1 PC). "
+        "Returns: status_code (HTTP) and the SAP response body containing the created order number and details."
+    )
 )
 def create_maintenance_order() -> Dict[str, Any]:
     """ Creates a Maintenance Order in SAP with a predefined standard payload. """
